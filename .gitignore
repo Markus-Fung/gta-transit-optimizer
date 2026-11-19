@@ -1,0 +1,5 @@
+data/raw_gtfs/
+*.o
+router
+*.log
+__pycache__/
