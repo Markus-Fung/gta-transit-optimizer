@@ -7,7 +7,13 @@
 #include <queue>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+struct DisruptionConfig {
+    std::unordered_set<std::string> closed_stops;
+    std::unordered_map<std::string, int> route_delays_sec;
+};
 
 struct RouteStep {
     std::string stop_id;
@@ -23,17 +29,24 @@ struct RouteResult {
 
 inline RouteResult find_fastest_route(const TransitGraph& graph,
                                       const std::string& start_id,
-                                      const std::string& end_id) {
+                                      const std::string& end_id,
+                                      const DisruptionConfig& disruptions = {}) {
     RouteResult result;
     if (graph.stops.find(start_id) == graph.stops.end() ||
         graph.stops.find(end_id) == graph.stops.end()) {
         return result;
     }
 
+    // Fail-safe: if start or end station itself is closed, no valid route exists
+    if (disruptions.closed_stops.count(start_id) ||
+        disruptions.closed_stops.count(end_id)) {
+        return result;
+    }
+
     using Node = std::pair<int, std::string>; // (cost_sec, stop_id)
     std::priority_queue<Node, std::vector<Node>, std::greater<Node>> pq;
     std::unordered_map<std::string, int> dist;
-    std::unordered_map<std::string, std::pair<std::string, std::string>> parent; // stop -> (prev_stop, route_id)
+    std::unordered_map<std::string, std::pair<std::string, std::string>> parent;
 
     dist[start_id] = 0;
     pq.push({0, start_id});
@@ -49,7 +62,19 @@ inline RouteResult find_fastest_route(const TransitGraph& graph,
         if (it == graph.adj.end()) continue;
 
         for (const auto& edge : it->second) {
-            int next_dist = d + edge.travel_time_sec;
+            // Skip edges leading into a closed station
+            if (disruptions.closed_stops.count(edge.to_stop_id)) {
+                continue;
+            }
+
+            // Apply any active route delay penalty
+            int penalty = 0;
+            auto delay_it = disruptions.route_delays_sec.find(edge.route_id);
+            if (delay_it != disruptions.route_delays_sec.end()) {
+                penalty = delay_it->second;
+            }
+
+            int next_dist = d + edge.travel_time_sec + penalty;
             if (dist.find(edge.to_stop_id) == dist.end() || next_dist < dist[edge.to_stop_id]) {
                 dist[edge.to_stop_id] = next_dist;
                 parent[edge.to_stop_id] = {u, edge.route_id};
@@ -65,7 +90,6 @@ inline RouteResult find_fastest_route(const TransitGraph& graph,
     result.found = true;
     result.total_time_sec = dist[end_id];
 
-    // Reconstruct path backwards from end_id to start_id
     std::string curr = end_id;
     while (curr != start_id) {
         auto [prev, route_id] = parent[curr];
