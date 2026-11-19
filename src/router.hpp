@@ -67,11 +67,12 @@ inline RouteResult find_fastest_route(const TransitGraph& graph,
                 continue;
             }
 
-            // Apply any active route delay penalty
+            // Apply any active route delay penalty (substring match, e.g., "LE" matches all Lakeshore East routes)
             int penalty = 0;
-            auto delay_it = disruptions.route_delays_sec.find(edge.route_id);
-            if (delay_it != disruptions.route_delays_sec.end()) {
-                penalty = delay_it->second;
+            for (const auto& [pattern, delay_sec] : disruptions.route_delays_sec) {
+                if (edge.route_id.find(pattern) != std::string::npos) {
+                    penalty += delay_sec;
+                }
             }
 
             int next_dist = d + edge.travel_time_sec + penalty;
